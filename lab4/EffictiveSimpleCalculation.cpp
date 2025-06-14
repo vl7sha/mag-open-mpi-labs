@@ -1,97 +1,90 @@
 ﻿#include <iostream>
 #include <cmath>
-#include <chrono>
 #include <omp.h>
-#include <limits> // Для numeric_limits
+#include <chrono>
 
-// Функция для вычисления интеграла методом Симпсона
-double simpsonMethod(double a, double b, int n, double (*f)(double, double)) {
-    double h = (b - a) / n;
+// Функция для вычисления f(x) с заданной точностью
+double f(double x, double epsilon) {
     double sum = 0.0;
+    double term = 1.0; // Первый член ряда
+    int n = 1;
 
-#pragma omp parallel for reduction(+:sum)
-    for (int i = 0; i < n; ++i) {
-        double x0 = a + i * h;
-        double x1 = a + (i + 1) * h;
-        sum += f(x0, 1e-6) + 4 * f((x0 + x1) / 2, 1e-6) + f(x1, 1e-6);
-    }
-
-    return (h / 6) * sum;
-}
-
-// Функция, которую будем интегрировать
-double f(double x, double precision) {
-    double result = 0.0;
-    double term;
-    int n = 0;
-
-    if (x == 0.0) {
-        return 0.0;
-    }
-
-    while (true) {
-        term = pow(-1, n) / (tgamma(2 * n + 1) * pow(4.0 * n + 1.0, x) * pow(x, 4 * n + 1));
-
-        if (std::abs(term) < precision) {
-            break;
-        }
-
-        result += term;
+    while (fabs(term) > epsilon) {
+        term = pow(-1, n) / (tgamma(2 * n + 1) * (2 * n)) * pow(x, 2 * n);
+        sum += term;
         n++;
     }
 
-    return result;
+    return sum;
+}
+
+// Последовательный метод трапеций
+double trapezoidal_rule_seq(double a, double b, int N, double epsilon) {
+    double h = (b - a) / N;
+    double sum = 0.0;
+
+    // Вычисляем значения f(a) и f(b)
+    double fa = f(a, epsilon);
+    double fb = f(b, epsilon);
+
+    // Суммируем значения f(x_i) для i = 1, ..., N-1
+    for (int i = 1; i < N; ++i) {
+        double xi = a + i * h;
+        sum += f(xi, epsilon);
+    }
+
+    // Формула метода трапеций
+    return h * (fa + 2 * sum + fb) / 2.0;
+}
+
+// Параллельный метод трапеций с OpenMP
+double trapezoidal_rule_par(double a, double b, int N, double epsilon) {
+    double h = (b - a) / N;
+    double sum = 0.0;
+
+    #pragma omp parallel for reduction(+ : sum)
+    for (int i = 1; i < N; ++i) {
+        double xi = a + i * h;
+        sum += f(xi, epsilon);
+    }
+
+    // Вычисляем значения f(a) и f(b)
+    double fa = f(a, epsilon);
+    double fb = f(b, epsilon);
+
+    // Формула метода трапеций
+    return h * (fa + 2 * sum + fb) / 2.0;
 }
 
 int main() {
-    double a; // Нижний предел интегрирования
-    double b = 1.0; // Верхний предел интегрирования
-    int n; // Количество интервалов
-    double precision; // Точность вычисления ряда
+    // Параметры задачи
+    double a = 0.0; // Левая граница
+    double b = 10.0; // Правая граница
+    int N = 1; // Количество отрезков разбиения
+    double epsilon = 1e-6; // Точность для ряда
 
-    // Запрашиваем у пользователя ввод a, n и precision
-    std::cout << "Enter the lower limit of integration (a): ";
-    std::cin >> a;
-    std::cout << "Enter the number of intervals (n): ";
-    std::cin >> n;
-    std::cout << "Enter the desired precision: ";
-    std::cin >> precision;
+    // Измерение времени для последовательного метода
+    auto start_seq = std::chrono::high_resolution_clock::now();
+    double result_seq = trapezoidal_rule_seq(a, b, N, epsilon);
+    auto end_seq = std::chrono::high_resolution_clock::now();
 
-    // Проверяем входные данные
-    if (n % 2 != 0 || n <= 0) {
-        std::cout << "Error: n must be a positive even number." << std::endl;
-        return 1;
-    }
+    // Измерение времени для параллельного метода
+    auto start_par = std::chrono::high_resolution_clock::now();
+    double result_par = trapezoidal_rule_par(a, b, N, epsilon);
+    auto end_par = std::chrono::high_resolution_clock::now();
 
-    if (a < 0) {
-        std::cout << "Error: a must be non-negative." << std::endl;
-        return 1;
-    }
+    // Расчет времени выполнения
+    auto duration_seq = std::chrono::duration_cast<std::chrono::milliseconds>(end_seq - start_seq).count();
+    auto duration_par = std::chrono::duration_cast<std::chrono::milliseconds>(end_par - start_par).count();
 
-    if (precision <= 0) {
-        std::cout << "Error: Precision must be a positive number." << std::endl;
-        return 1;
-    }
+    // Вывод результатов
+    std::cout << "Последовательный метод:" << std::endl;
+    std::cout << "  Результат: " << result_seq << std::endl;
+    std::cout << "  Время выполнения: " << duration_seq << " мс" << std::endl;
 
-    // Замер времени выполнения без OpenMP
-    auto start_no_omp = std::chrono::high_resolution_clock::now();
-    double result_no_omp = simpsonMethod(a, b, n, f);
-    auto end_no_omp = std::chrono::high_resolution_clock::now();
-    std::chrono::duration<double> duration_no_omp = end_no_omp - start_no_omp;
-
-    // Вывод результатов без OpenMP
-    std::cout << "Result without OpenMP: " << result_no_omp << std::endl;
-    std::cout << "Time without OpenMP: " << duration_no_omp.count() << " s" << std::endl;
-
-    // Замер времени выполнения с OpenMP
-    auto start_omp = std::chrono::high_resolution_clock::now();
-    double result_omp = simpsonMethod(a, b, n, f);
-    auto end_omp = std::chrono::high_resolution_clock::now();
-    std::chrono::duration<double> duration_omp = end_omp - start_omp;
-
-    // Вывод результатов с OpenMP
-    std::cout << "Result with OpenMP: " << result_omp << std::endl;
-    std::cout << "Time with OpenMP: " << duration_omp.count() << " s" << std::endl;
+    std::cout << "Параллельный метод:" << std::endl;
+    std::cout << "  Результат: " << result_par << std::endl;
+    std::cout << "  Время выполнения: " << duration_par << " мс" << std::endl;
 
     return 0;
 }
