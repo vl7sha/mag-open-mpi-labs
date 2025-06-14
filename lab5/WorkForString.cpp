@@ -1,120 +1,213 @@
 ﻿#include <iostream>
 #include <string>
 #include <vector>
-#include <algorithm>
+#include <unordered_set>
 #include <chrono>
 #include <omp.h>
-#include <random>
+#include <locale>
 
 using namespace std;
 
-// Function to generate a random string of given length
-string generateRandomString(int length) {
-    static const char charset[] =
-        "abcdefghijklmnopqrstuvwxyz"
-        "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-        "0123456789 ";
-    static mt19937 rng(chrono::steady_clock::now().time_since_epoch().count());
-    static uniform_int_distribution<size_t> uniform(0, sizeof(charset) - 2);
-    string str;
-    str.reserve(length);
-    for (int i = 0; i < length; ++i) {
-        str += charset[uniform(rng)];
+// --- Английские гласные ---
+unordered_set<char> getEnglishVowels() {
+    return {'A','E','I','O','U','a','e','i','o','u'};
+}
+
+// --- Русские гласные ---
+unordered_set<wchar_t> getRussianVowels() {
+    return {L'А',L'Е',L'Ё',L'И',L'О',L'У',L'Ы',L'Э',L'Ю',L'Я',
+            L'а',L'е',L'ё',L'и',L'о',L'у',L'ы',L'э',L'ю',L'я'};
+}
+
+// --- Последовательный поиск (английский) ---
+unordered_set<char> findMissingVowelsSequential(
+        const vector<string>& text, const unordered_set<char>& vowels)
+{
+    unordered_set<char> found;
+
+    for (const auto& line : text) {
+        for (char c : line) {
+            if (vowels.count(c)) {
+                found.insert(c);
+            }
+        }
     }
-    return str;
+
+    unordered_set<char> missing;
+    for (char v : vowels) {
+        if (!found.count(v)) missing.insert(v);
+    }
+    return missing;
+}
+
+// --- Параллельный поиск (английский) ---
+unordered_set<char> findMissingVowelsParallel(
+        const vector<string>& text, const unordered_set<char>& vowels)
+{
+    vector<unordered_set<char>> local_found(omp_get_max_threads());
+
+    #pragma omp parallel for
+    for (int i = 0; i < (int)text.size(); ++i) {
+        int tid = omp_get_thread_num();
+        for (char c : text[i]) {
+            if (vowels.count(c)) {
+                local_found[tid].insert(c);
+            }
+        }
+    }
+
+    unordered_set<char> found;
+    for (const auto& s : local_found) found.insert(s.begin(), s.end());
+
+    unordered_set<char> missing;
+    for (char v : vowels) {
+        if (!found.count(v)) missing.insert(v);
+    }
+    return missing;
+}
+
+// --- Последовательный поиск (русский) ---
+unordered_set<wchar_t> findMissingVowelsSequentialW(
+        const vector<wstring>& text, const unordered_set<wchar_t>& vowels)
+{
+    unordered_set<wchar_t> found;
+
+    for (const auto& line : text) {
+        for (wchar_t c : line) {
+            if (vowels.count(c)) {
+                found.insert(c);
+            }
+        }
+    }
+
+    unordered_set<wchar_t> missing;
+    for (wchar_t v : vowels) {
+        if (!found.count(v)) missing.insert(v);
+    }
+    return missing;
+}
+
+// --- Параллельный поиск (русский) ---
+unordered_set<wchar_t> findMissingVowelsParallelW(
+        const vector<wstring>& text, const unordered_set<wchar_t>& vowels)
+{
+    vector<unordered_set<wchar_t>> local_found(omp_get_max_threads());
+
+    #pragma omp parallel for
+    for (int i = 0; i < (int)text.size(); ++i) {
+        int tid = omp_get_thread_num();
+        for (wchar_t c : text[i]) {
+            if (vowels.count(c)) {
+                local_found[tid].insert(c);
+            }
+        }
+    }
+
+    unordered_set<wchar_t> found;
+    for (const auto& s : local_found) found.insert(s.begin(), s.end());
+
+    unordered_set<wchar_t> missing;
+    for (wchar_t v : vowels) {
+        if (!found.count(v)) missing.insert(v);
+    }
+    return missing;
+}
+
+// --- Вывод для английских гласных ---
+void printResult(const unordered_set<char>& missing, const string& lang) {
+    if (missing.empty()) {
+        cout << "[" << lang << "] Все гласные присутствуют в тексте.\n";
+    } else {
+        cout << "[" << lang << "] Отсутствующие гласные: ";
+        for (char c : missing) cout << c << " ";
+        cout << "\n";
+    }
+}
+
+// --- Вывод для русских гласных ---
+void printResultW(const unordered_set<wchar_t>& missing, const wstring& lang) {
+    if (missing.empty()) {
+        wcout << L"[" << lang << L"] Все гласные присутствуют в тексте.\n";
+    } else {
+        wcout << L"[" << lang << L"] Отсутствующие гласные: ";
+        for (wchar_t c : missing) wcout << c << L" ";
+        wcout << L"\n";
+    }
+}
+
+// --- Тест для английского текста ---
+void testEnglishVowels(const vector<string>& text) {
+    auto vowels = getEnglishVowels();
+
+    auto start_seq = chrono::high_resolution_clock::now();
+    auto missing_seq = findMissingVowelsSequential(text, vowels);
+    auto end_seq = chrono::high_resolution_clock::now();
+
+    auto start_par = chrono::high_resolution_clock::now();
+    auto missing_par = findMissingVowelsParallel(text, vowels);
+    auto end_par = chrono::high_resolution_clock::now();
+
+    printResult(missing_seq, "English");
+
+    chrono::duration<double> dur_seq = end_seq - start_seq;
+    chrono::duration<double> dur_par = end_par - start_par;
+
+    cout << "⏱ Sequential: " << dur_seq.count() << " s\n";
+    cout << "⏱ Parallel:   " << dur_par.count() << " s\n";
+
+    if (missing_seq == missing_par) {
+        cout << "✅ Results match.\n";
+    } else {
+        cout << "❌ Results differ!\n";
+    }
+}
+
+// --- Тест для русского текста ---
+void testRussianVowels(const vector<wstring>& text) {
+    auto vowels = getRussianVowels();
+
+    auto start_seq = chrono::high_resolution_clock::now();
+    auto missing_seq = findMissingVowelsSequentialW(text, vowels);
+    auto end_seq = chrono::high_resolution_clock::now();
+
+    auto start_par = chrono::high_resolution_clock::now();
+    auto missing_par = findMissingVowelsParallelW(text, vowels);
+    auto end_par = chrono::high_resolution_clock::now();
+
+    printResultW(missing_seq, L"Русский");
+
+    chrono::duration<double> dur_seq = end_seq - start_seq;
+    chrono::duration<double> dur_par = end_par - start_par;
+
+    wcout << L"⏱ Последовательно: " << dur_seq.count() << L" секунд\n";
+    wcout << L"⏱ Параллельно:     " << dur_par.count() << L" секунд\n";
+
+    if (missing_seq == missing_par) {
+        wcout << L"✅ Результаты совпадают.\n";
+    } else {
+        wcout << L"❌ Результаты отличаются!\n";
+    }
 }
 
 int main() {
-    int arraySize = 100; // Увеличим размер массива строк
-    int stringLength; // Length of each string
+    // Устанавливаем локаль для корректного вывода русских символов
+    setlocale(LC_ALL, "");
 
-    // Get string length from the user
-    cout << "Enter the desired length of the strings: ";
-    cin >> stringLength;
+    // Пример английского текста
+    vector<string> englishText = {
+        "The quick brown fox jumps over the lazy dog",
+        "This sentence contains almost every vowel"
+    };
 
-    vector<string> textArray(arraySize);
+    // Пример русского текста (wstring + L"")
+    vector<wstring> russianText = {
+        L"Съешь ещё этих мягких французских булок, да выпей чаю",
+        L"В этой строке содержатся почти все русские гласные"
+    };
 
-    // Generate the string array
-    for (int i = 0; i < arraySize; ++i) {
-        textArray[i] = generateRandomString(stringLength);
-    }
-
-    // Output the generated string array (optional, remove for performance tests)
-    // cout << "Generated String Array:" << endl;
-    // for (int i = 0; i < arraySize; ++i) {
-    //     cout << "String " << i + 1 << ": " << textArray[i] << endl;
-    // }
-    // cout << endl;
-
-    // **Without parallelization**
-    auto start_serial = chrono::high_resolution_clock::now();
-    vector<bool> digitPresentSerial(10, false);
-    for (const string& text : textArray) {
-        for (char c : text) {
-            if (isdigit(c)) {
-                digitPresentSerial[c - '0'] = true;
-            }
-        }
-    }
-
-    cout << "Missing digits (without parallelization): ";
-    bool allDigitsPresentSerial = true;
-    for (int i = 0; i < 10; ++i) {
-        if (!digitPresentSerial[i]) {
-            cout << i << " ";
-            allDigitsPresentSerial = false;
-        }
-    }
-    if (allDigitsPresentSerial) {
-        cout << "All digits are present";
-    }
-    cout << endl;
-
-    auto end_serial = chrono::high_resolution_clock::now();
-    auto duration_serial = chrono::duration_cast<chrono::microseconds>(end_serial - start_serial);
-    cout << "Execution time (without parallelization): " << duration_serial.count() << " microseconds" << endl;
-
-    // **With parallelization**
-    auto start_parallel = chrono::high_resolution_clock::now();
-    vector<bool> digitPresentParallel(10, false);
-
-#pragma omp parallel
-    {
-        vector<bool> localDigitPresent(10, false);
-
-#pragma omp for nowait
-        for (int i = 0; i < textArray.size(); ++i) {
-            for (char c : textArray[i]) {
-                if (isdigit(c)) {
-                    localDigitPresent[c - '0'] = true;
-                }
-            }
-        }
-
-#pragma omp critical
-        {
-            for (int j = 0; j < 10; ++j) {
-                digitPresentParallel[j] = digitPresentParallel[j] || localDigitPresent[j];
-            }
-        }
-    }
-
-    cout << "Missing digits (with parallelization): ";
-    bool allDigitsPresentParallel = true;
-    for (int i = 0; i < 10; ++i) {
-        if (!digitPresentParallel[i]) {
-            cout << i << " ";
-            allDigitsPresentParallel = false;
-        }
-    }
-    if (allDigitsPresentParallel) {
-        cout << "All digits are present";
-    }
-    cout << endl;
-
-    auto end_parallel = chrono::high_resolution_clock::now();
-    auto duration_parallel = chrono::duration_cast<chrono::microseconds>(end_parallel - start_parallel);
-    cout << "Execution time (with parallelization): " << duration_parallel.count() << " microseconds" << endl;
+    testEnglishVowels(englishText);
+    wcout << L"\n";
+    testRussianVowels(russianText);
 
     return 0;
 }
