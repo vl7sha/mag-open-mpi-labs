@@ -1,117 +1,117 @@
 ﻿#include <iostream>
-#include <vector>
 #include <cmath>
+#include <string>
+#include <map>
 #include <omp.h>
 
 using namespace std;
 
-// Function to calculate area sequentially
-double calculateAreaSequential(const vector<pair<double, double>>& vertices) {
-    double area = 0.0;
-    int n = vertices.size();
-
-    for (int i = 0; i < n; ++i) {
-        int j = (i + 1) % n; // Next vertex
-        area += (vertices[i].first * vertices[j].second) - (vertices[j].first * vertices[i].second);
+// Функция, которую будем интегрировать
+double f(double x, const string& func) {
+    if (func == "x*x") return x * x;
+    else if (func == "sin(x)") return sin(x);
+    else if (func == "cos(x)") return cos(x);
+    else if (func == "exp(x)") return exp(x);
+    else if (func == "sqrt(x)") return sqrt(x);
+    else if (func == "1/(1+x*x)") return 1.0 / (1.0 + x * x);
+    else {
+        cerr << "Unknown function. Using default: x*x\n";
+        return x * x;
     }
-
-    return fabs(area) / 2.0;
 }
 
-// Function to calculate area in parallel
-double calculateAreaParallel(const vector<pair<double, double>>& vertices) {
-    double area = 0.0;
-    int n = vertices.size();
+// Последовательное вычисление
+double integrateSequential(double a, double b, int n, const string& func) {
+    double h = (b - a) / n;
+    double sum = 0.0;
 
-#pragma omp parallel
-    {
-        double localArea = 0.0;
-        int thread = omp_get_num_threads();
-        printf("%d \n", thread);
-#pragma omp for
-        for (int i = 0; i < n; ++i) {
-            int j = (i + 1) % n; // Next vertex
-            localArea += (vertices[i].first * vertices[j].second) - (vertices[j].first * vertices[i].second);
-        }
-
-#pragma omp atomic
-        area += localArea;
+    for (int i = 1; i <= n; ++i) {
+        double x = a + i * h;
+        sum += f(x, func);
     }
 
-    return fabs(area) / 2.0;
+    return sum * h;
 }
 
-// Function to get preset vertices
-vector<pair<double, double>> getPresetVertices(int choice) {
-    switch (choice) {
-    case 1: // Triangle
-        return { {0, 0}, {4, 0}, {2, 3} };
-    case 2: // Square
-        return { {0, 0}, {4, 0}, {4, 4}, {0, 4} };
-    case 3: // Pentagon
-        return { {1, 1}, {2, 4}, {5, 5}, {6, 2}, {3, 0} };
-    default:
-        return {};
+// Параллельное вычисление с OpenMP
+double integrateParallel(double a, double b, int n, const string& func) {
+    double h = (b - a) / n;
+    double sum = 0.0;
+
+#pragma omp parallel for reduction(+:sum)
+    for (int i = 1; i <= n; ++i) {
+        double x = a + i * h;
+        sum += f(x, func);
     }
+
+    return sum * h;
 }
 
 int main() {
-    int methodChoice;
-    cout << "Choose the method to calculate the area:\n";
-    cout << "1. Input coordinates manually\n";
-    cout << "2. Use preset coordinates\n";
-    cout << "Enter your choice (1-2): ";
-    cin >> methodChoice;
+    // Список поддерживаемых функций
+    map<int, string> functions = {
+        {1, "x*x"},
+        {2, "sin(x)"},
+        {3, "cos(x)"},
+        {4, "exp(x)"},
+        {5, "sqrt(x)"},
+        {6, "1/(1+x*x)"}
+    };
 
-    vector<pair<double, double>> vertices;
-
-    if (methodChoice == 1) {
-        int n;
-        cout << "Enter the number of vertices of the polygon: ";
-        cin >> n;
-
-        vertices.resize(n);
-        for (int i = 0; i < n; ++i) {
-            cout << "Enter coordinates of vertex " << i + 1 << " (x y): ";
-            cin >> vertices[i].first >> vertices[i].second;
-        }
+    // Ввод данных от пользователя
+    int choice;
+    cout << "Выберите функцию для интегрирования:\n";
+    for (const auto& [key, val] : functions) {
+        cout << key << ". " << val << endl;
     }
-    else if (methodChoice == 2) {
-        int presetChoice;
-        cout << "Choose a preset polygon:\n";
-        cout << "1. Triangle\n";
-        cout << "2. Square\n";
-        cout << "3. Pentagon\n";
-        cout << "Enter your choice (1-3): ";
-        cin >> presetChoice;
+    cout << "Введите номер функции: ";
+    cin >> choice;
 
-        vertices = getPresetVertices(presetChoice);
-
-        if (vertices.empty()) {
-            cout << "Invalid choice! Exiting program." << endl;
-            return -1;
-        }
-    }
-    else {
-        cout << "Invalid choice! Exiting program." << endl;
+    string func = functions[choice];
+    if (func.empty()) {
+        cerr << "Неверный выбор функции!" << endl;
         return -1;
     }
 
-    // Measure execution time for sequential version
-    double startTime = omp_get_wtime();
-    double areaSequential = calculateAreaSequential(vertices);
-    double endTime = omp_get_wtime();
+    double a, b;
+    int n;
 
-    cout << "Polygon area (sequential): " << areaSequential << endl;
-    cout << "Execution time (sequential): " << endTime - startTime << " seconds" << endl;
+    cout << "Введите начало интервала a: ";
+    cin >> a;
 
-    // Measure execution time for parallel version
-    startTime = omp_get_wtime();
-    double areaParallel = calculateAreaParallel(vertices);
-    endTime = omp_get_wtime();
+    cout << "Введите конец интервала b: ";
+    cin >> b;
 
-    cout << "Polygon area (parallel): " << areaParallel << endl;
-    cout << "Execution time (parallel): " << endTime - startTime << " seconds" << endl;
+    cout << "Введите количество разбиений n: ";
+    cin >> n;
+
+    if (n <= 0 || b <= a) {
+        cerr << "Ошибка: n должно быть положительным, и b > a." << endl;
+        return -1;
+    }
+
+    double start_time, end_time;
+
+    // Последовательная версия
+    cout << "\n--- Последовательное вычисление ---\n";
+    start_time = omp_get_wtime();
+    double result_seq = integrateSequential(a, b, n, func);
+    end_time = omp_get_wtime();
+
+    cout << "Результат (последовательно): " << result_seq << endl;
+    cout << "Время выполнения: " << end_time - start_time << " секунд\n";
+
+    // Параллельная версия
+    cout << "\n--- Параллельное вычисление ---\n";
+    start_time = omp_get_wtime();
+    double result_par = integrateParallel(a, b, n, func);
+    end_time = omp_get_wtime();
+
+    cout << "Результат (параллельно): " << result_par << endl;
+    cout << "Время выполнения: " << end_time - start_time << " секунд\n";
+
+    // Разница между результатами
+    cout << "Разница между результатами: " << abs(result_par - result_seq) << endl;
 
     return 0;
 }
